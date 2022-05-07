@@ -1,0 +1,439 @@
+import numpy as np
+from numba import jit
+import matplotlib.pyplot as plt
+import quantecon as qe
+from quantecon.distributions import BetaBinomial
+
+n, a, b = 50, 200, 100
+w_min, w_max = 10, 60
+w_vals = np.linspace(w_min, w_max, n+1)
+dist = BetaBinomial(n, a, b)
+p_vals = dist.pdf()
+
+@jit(nopython=True)
+def compute_reservation_wage_two(c=25,β=0.99,w_vals=w_vals,p_vals=p_vals,max_iter=500,tol=1e-6):
+    # First compute φ #
+    φ = np.sum(w_vals*p_vals)/(1-β)
+    i = 0
+    error = tol + 1
+    while i < max_iter and error > tol:
+        s = np.maximum(w_vals/(1-β),φ)
+        φ_next = c + β*np.sum(s*p_vals)
+        
+        error = np.abs(φ_next - φ)
+        i += 1
+        φ = φ_next
+        
+    # Now compute the reservation wage #
+    return (1-β)*(c+β*φ)
+
+cdf = np.cumsum(p_vals)
+
+@jit(nopython=True)
+def compute_stopping_time(w_bar, seed=1234):
+
+    np.random.seed(seed)
+    t = 1
+    while True:
+        # Generate a wage draw
+        w = w_vals[qe.random.draw(cdf)]
+        if w >= w_bar:
+            stopping_time = t
+            break
+        else:
+            t += 1
+    return stopping_time
+
+@jit(nopython=True)
+def compute_mean_stopping_time(w_bar, num_reps=100000):
+    obs = np.empty(num_reps)
+    for i in range(num_reps):
+        obs[i] = compute_stopping_time(w_bar, seed=i)
+    return obs.mean()
+
+c_vals = np.linspace(10, 40, 25)
+stop_times = np.empty_like(c_vals)
+
+for i, c in enumerate(c_vals):
+    w_bar = compute_reservation_wage_two(c=c)
+    stop_times[i] = compute_mean_stopping_time(w_bar)
+
+fig, ax = plt.subplots(figsize=(9, 6.5))
+
+ax.plot(c_vals, stop_times, label="mean unemployment duration")
+ax.set(xlabel="unemployment compensation", ylabel="months")
+ax.legend()
+
+plt.show()
+
+    # B) #
+
+n = 50
+w_min, w_max = 0, 50
+w_vals = np.linspace(w_min, w_max, n+1)
+#dist = BetaBinomial(n, a, b)
+#p_vals = dist.pdf()
+
+μ = log(10)
+# Solve for σ 
+def f1(σ):
+    return (e**(σ**2)-1)*(e**(2*μ+σ**2))-25
+
+#σ_solve = fsolve(f1,5)
+σ_solve = fsolve(f1,5)
+
+# probability distribution
+p_vals = stats.lognorm.pdf(w_vals, σ_solve, loc=0, scale=μ) 
+
+
+@jit(nopython=True)
+def compute_reservation_wage_two(c=5,β=0.99,w_vals=w_vals,p_vals=p_vals,max_iter=500,tol=1e-6):
+    # First compute φ #
+    φ = np.sum(w_vals*p_vals)/(1-β)
+    i = 0
+    error = tol + 1
+    while i < max_iter and error > tol:
+        s = np.maximum(w_vals/(1-β),φ)
+        φ_next = c + β*np.sum(s*p_vals)
+        
+        error = np.abs(φ_next - φ)
+        i += 1
+        φ = φ_next
+        
+    # Now compute the reservation wage #
+    return (1-β)*(c+β*φ)
+
+cdf = np.cumsum(p_vals)
+#plt.plot(w_vals, cdf)
+
+@jit(nopython=True)
+def compute_stopping_time(w_bar, seed=1234):
+
+    np.random.seed(seed)
+    t = 1
+    while True:
+        # Generate a wage draw
+        w = w_vals[qe.random.draw(cdf)]
+        if w >= w_bar:
+            stopping_time = t
+            break
+        else:
+            t += 1
+    return stopping_time
+
+@jit(nopython=True)
+def compute_mean_stopping_time(w_bar, num_reps=100000):
+    obs = np.empty(num_reps)
+    for i in range(num_reps):
+        obs[i] = compute_stopping_time(w_bar, seed=i)
+    return obs.mean()
+
+# reservation wage
+reserve_wage = compute_reservation_wage_two()
+print('reserve_wage=',reserve_wage)
+
+# mean unemployment duration
+stop_time = compute_mean_stopping_time(reserve_wage)
+print('stop_time=',stop_time)
+#stop_t = int(stop_time)
+
+plt.plot(w_vals, p_vals)
+# empirical distribution of observed wages is left truncated distribution of lognormal
+plt.plot([reserve_wage,reserve_wage],[0,cdf[int(stop_time)]])
+
+plt.show()
+
+  # C) #
+  
+  # A default utility function
+@njit
+def u(c, σ):
+    if c > 0:
+        return (c**(1 - σ) - 1) / (1 - σ)
+    else:
+        return -10e6
+
+class McCallModel:
+    """    Stores the parameters and functions associated with a given model.
+    """
+    def __init__(self,
+                 α=0.2,       # Job separation rate
+                 β=0.98,      # Discount rate
+                 γ=0.7,       # Job offer rate
+                 c=6.0,       # Unemployment compensation
+                 σ=2.0,       # Utility parameter
+                 w_vec=None,  # Possible wage values
+                 p_vec=None): # Probabilities over w_vec
+        self.α, self.β, self.γ, self.c = α, β, γ, c
+        self.σ = σ
+        # Add a default wage vector and probabilities over the vector using
+        # the beta-binomial distribution
+        if w_vec is None:
+            n = 60  # number of possible outcomes for wage
+            self.w_vec = np.linspace(10, 20, n)     # wages between 10 and 20
+            a, b = 600, 400  # shape parameters
+            dist = BetaBinomial(n-1, a, b)
+            self.p_vec = dist.pdf()
+        else:
+            self.w_vec = w_vec
+            self.p_vec = p_vec
+
+def operator_factory(mcm, parallel_flag=True):
+    """
+    mcm is an instance of McCallModel
+    """
+    α, β, γ, c = mcm.α, mcm.β, mcm.γ, mcm.c
+    σ, w_vec, p_vec = mcm.σ, mcm.w_vec, mcm.p_vec
+
+    @njit
+    def Q(v, h):
+        """
+        A jitted function to update the Bellman equations
+        """
+        v_new = np.empty_like(v)
+
+        for i in range(len(w_vec)):
+            w = w_vec[i]
+            v_new[i] = u(w, σ) + β*((1 - α)*v[i] + α*h)
+
+        h_new = u(c, σ) + β*(1 - γ)*h + β*γ*np.sum(np.maximum(h, v)*p_vec)
+        return v_new, h_new
+    return Q
+
+def solve_model(mcm, use_parallel=True, tol=1e-5, max_iter=2000):
+    """
+    Iterates to convergence on the Bellman equations
+    mcm is an instance of McCallModel
+    """
+    Q = operator_factory(mcm, use_parallel)
+
+    v = np.ones_like(mcm.w_vec)   # Initial guess of v
+    h = 1                         # Initial guess of h
+    i = 0
+    error = tol + 1
+
+    while error > tol and i < max_iter:
+        v_new, h_new = Q(v, h)
+        error_1 = np.max(np.abs(v_new - v))
+        error_2 = np.abs(h_new - h)
+        error = max(error_1, error_2)
+        v = v_new
+        h = h_new
+        i += 1
+    return v, h
+
+mcm = McCallModel()
+v, h = solve_model(mcm)
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+ax.plot(mcm.w_vec, v, 'b-', lw=2, alpha=0.7, label='$v$')
+ax.plot(mcm.w_vec, [h] * len(mcm.w_vec), 'g-', lw=2, alpha=0.7, label='$h$')
+ax.set_xlim(min(mcm.w_vec), max(mcm.w_vec))
+ax.legend()
+ax.grid()
+
+plt.show()
+
+def compute_reservation_wage(mcm, return_values=False):
+    """
+    Computes the reservation wage of an instance of the McCall model
+    by finding the smallest w such that v(w) > h.
+
+    If v(w) > h for all w, then the reservation wage w_bar is set to
+    the lowest wage in mcm.w_vec.
+
+    If v(w) < h for all w, then w_bar is set to np.inf.
+
+    """
+
+    v, h = solve_model(mcm)
+    w_idx = np.searchsorted(v - h, 0)
+
+    if w_idx == len(v):
+        w_bar = np.inf
+    else:
+        w_bar = mcm.w_vec[w_idx]
+
+    if return_values == False:
+        return w_bar
+    else:
+        return w_bar, v, h
+
+grid_size = 25
+c_vals = np.linspace(2, 12, grid_size)  # values of unemployment compensation
+w_bar_vals = np.empty_like(c_vals)
+
+mcm = McCallModel()
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+for i, c in enumerate(c_vals):
+    mcm.c = c
+    w_bar = compute_reservation_wage(mcm)
+    w_bar_vals[i] = w_bar
+
+ax.set(xlabel='unemployment compensation',
+       ylabel='reservation wage')
+ax.plot(c_vals, w_bar_vals, 'b-', lw=2, alpha=0.7,
+        label=r'$\bar w$ as a function of $c$')
+ax.legend(loc='upper left')
+ax.grid()
+
+plt.show()
+
+grid_size = 25
+c_vals = np.linspace(2, 12, grid_size)  # values of unemployment compensation
+w_bar_vals = np.empty_like(c_vals)
+
+mcm = McCallModel()
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+for i, c in enumerate(c_vals):
+    mcm.c = c
+    w_bar = compute_reservation_wage(mcm)
+    w_bar_vals[i] = w_bar
+
+ax.set(xlabel='unemployment compensation',
+       ylabel='reservation wage')
+ax.plot(c_vals, w_bar_vals, 'b-', lw=2, alpha=0.7,
+        label=r'$\bar w$ as a function of $c$')
+ax.legend(loc='upper left')
+ax.grid()
+
+plt.show()
+
+# D) #
+
+# A default utility function
+@njit
+def u(c, σ):
+    if c > 0:
+        return (c**(1 - σ) - 1) / (1 - σ)
+    else:
+        return -10e6
+
+μ = log(10)
+# Solve for σ 
+def f1(σ_lognorm):
+    return (e**(σ_lognorm**2)-1)*(e**(2*μ+σ_lognorm**2))-25
+σ_solve = fsolve(f1,5)
+
+class McCallModel:
+    """
+    Stores the parameters and functions associated with a given model.
+    """
+    def __init__(self,
+                 α=0.1,       # Job separation rate
+                 β=0.98,      # Discount rate
+                 γ=0.7,       # Job offer rate
+                 c=5.0,       # Unemployment compensation
+                 σ=2.0,       # Utility parameter
+                 w_vec=None,  # Possible wage values
+                 p_vec=None): # Probabilities over w_vec
+
+        self.α, self.β, self.γ, self.c = α, β, γ, c
+        self.σ = σ
+        # Add a default wage vector and probabilities over the vector using
+        # the beta-binomial distribution
+        if w_vec is None:
+            n = 50  # number of possible outcomes for wage
+            self.w_vec = np.linspace(0, 50, n+1)     # wages between 10 and 20            
+            self.p_vec = stats.lognorm.pdf(self.w_vec, σ_solve, loc=0, scale=μ)  
+        else:
+            self.w_vec = w_vec
+            self.p_vec = p_vec
+           
+def operator_factory(mcm, parallel_flag=True):
+    """    mcm is an instance of McCallModel
+    """
+    α, β, γ, c = mcm.α, mcm.β, mcm.γ, mcm.c
+    σ, w_vec, p_vec = mcm.σ, mcm.w_vec, mcm.p_vec
+    @njit
+    def Q(v, h):
+        """
+        A jitted function to update the Bellman equations
+        """
+        v_new = np.empty_like(v)
+
+        for i in range(len(w_vec)):
+            w = w_vec[i]
+            v_new[i] = u(w, σ) + β*((1 - α)*v[i] + α*h)
+
+        h_new = u(c, σ) + β*(1 - γ)*h + β*γ*np.sum(np.maximum(h, v)*p_vec)
+        return v_new, h_new
+    return Q
+
+def solve_model(mcm, use_parallel=True, tol=1e-5, max_iter=2000):
+    """
+    Iterates to convergence on the Bellman equations
+    mcm is an instance of McCallModel
+    """
+    Q = operator_factory(mcm, use_parallel)
+
+    v = np.ones_like(mcm.w_vec)   # Initial guess of v
+    h = 10                         # Initial guess of h
+    i = 0
+    error = tol + 1
+
+    while error > tol and i < max_iter:
+        v_new, h_new = Q(v, h)
+        error_1 = np.max(np.abs(v_new - v))
+        error_2 = np.abs(h_new - h)
+        error = max(error_1, error_2)
+        v = v_new
+        h = h_new
+        i += 1
+    return v, h
+
+mcm = McCallModel()
+v, h = solve_model(mcm)
+#print(v)
+#print("**************")
+#print(h)
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+ax.plot(mcm.w_vec, v, 'b-', lw=2, alpha=0.7, label='$v$')
+ax.plot(mcm.w_vec, [h]*len(mcm.w_vec), 'g-', lw=2, alpha=0.7, label='$h$')
+ax.set_xlim(min(mcm.w_vec), max(mcm.w_vec))
+ax.legend()
+ax.grid()
+
+plt.show()
+
+def compute_reservation_wage(mcm, return_values=False):
+    """
+    Computes the reservation wage of an instance of the McCall model
+    by finding the smallest w such that v(w) > h.
+
+    If v(w) > h for all w, then the reservation wage w_bar is set to
+    the lowest wage in mcm.w_vec.
+
+    If v(w) < h for all w, then w_bar is set to np.inf.
+    """
+    v, h = solve_model(mcm)
+    w_idx = np.searchsorted(v - h, 0)
+
+    if w_idx == len(v):
+        w_bar = np.inf
+    else:
+        w_bar = mcm.w_vec[w_idx]
+
+    if return_values == False:
+        return w_bar
+    else:
+        return w_bar, v, h
+
+c_vals = 5
+
+mcm = McCallModel()
+#print(mcm.p_vec)
+plt.plot(mcm.w_vec,mcm.p_vec)
+
+mcm.c = c_vals
+reserve_wage = compute_reservation_wage(mcm)
+
+print('reserve_wage=',reserve_wage)
+plt.show()
